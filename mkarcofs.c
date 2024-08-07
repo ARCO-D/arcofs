@@ -7,6 +7,7 @@
 #include<errno.h>
 
 #define ARCOFS_BLOCK_SIZE 1024
+#define ARCOFS_MAGIC   0x27266673 // 0x6673 is the ascii of 'fs'
 
 /*
  * description:
@@ -19,11 +20,12 @@
 */
 
 struct arcofs_super_block {
+    unsigned int s_magic;
     int s_inodes_count;
     int s_free_inodes_count;
     int s_blocks_count;
     int s_free_blocks_count;
-    char pad[1008];
+    char pad[1004];
 };
 
 struct arcofs_inode {
@@ -32,6 +34,10 @@ struct arcofs_inode {
     /*08*/ int i_block[8];
     /*40*/ char filename[12];
     /*52*/ char pad[12];
+};
+
+struct arcofs_bytemap {
+    unsigned char idx[1024];
 };
 
 int main(int argc, char* argv[])
@@ -83,6 +89,7 @@ int main(int argc, char* argv[])
 
     /* 格式化super_block */
     struct arcofs_super_block *sb = malloc(sizeof(struct arcofs_super_block));
+    sb->s_magic = ARCOFS_MAGIC;
     sb->s_inodes_count = 16;
     sb->s_free_inodes_count = 16;
     sb->s_blocks_count = block_num - 4;
@@ -96,10 +103,16 @@ int main(int argc, char* argv[])
 
     /* 格式化block bitmap */
     memset(start, 1, ARCOFS_BLOCK_SIZE); // memset按uchar填充
+    struct arcofs_bytemap *blockmap = (struct arcofs_bytemap*)start;
+    blockmap->idx[0] = 2;
+    blockmap->idx[1] = 2;
     start += ARCOFS_BLOCK_SIZE;
 
     /* 格式化inode bitmap */
     memset(start, 1, ARCOFS_BLOCK_SIZE);
+    struct arcofs_bytemap *inodemap = (struct arcofs_bytemap*)start;
+    inodemap->idx[0] = 2;
+    inodemap->idx[1] = 2;
     start += ARCOFS_BLOCK_SIZE;
 
     /* 格式化inode table */

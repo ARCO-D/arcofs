@@ -16,26 +16,23 @@
 #include <linux/delay.h>
 
 #define ARCOFS_VERSION "0.1"
+#define ARCOFS_BLOCK_SIZE 1024
 #define ARCOFS_MAGIC   0x27266673 // 0x6673 is the ascii of 'fs'
 
-#define ARCOFS_BLOCK_SIZE 1024
-
 /*
- * description:
- * as ext2, reserved first block for boot partition
- * block 1: super block
- * block 2: block bitmap
- * block 3: inode bitmap
- * block 4: inode table
- * block 5+ data area
-*/
-
+ * #1
+ * arcofs文件系统结构体 
+ */
+ // VFS的super block
+ //   s_fs_info(指向一个sbi对象)
+ //     s_as(指向arcofs的super block结构)
 struct arcofs_super_block {
+    unsigned int s_magic;
     int s_inodes_count;
     int s_free_inodes_count;
     int s_blocks_count;
     int s_free_blocks_count;
-    char pad[1008];
+    char pad[1004];
 };
 
 struct arcofs_inode {
@@ -46,13 +43,252 @@ struct arcofs_inode {
     /*52*/ char pad[12];
 };
 
+struct arcofs_bytemap {
+    unsigned char idx[1024];
+};
+
 struct arcofs_sb_info {
     int version;
     struct arcofs_super_block *s_as;
+    struct arcofs_bytemap *s_imap;
+    struct arcofs_bytemap *s_zmap;
+};
+
+/*
+ * #2
+ * 函数声明 
+ */
+int arcofs_writepage(struct page *page, struct writeback_control *wbc);
+static int arcofs_readpage(struct file *file, struct page *page);
+static sector_t arcofs_bmap(struct address_space *mapping, sector_t block);
+int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *bh, int create);
+
+
+void arcofs_set_inode(struct inode *inode, dev_t rdev);
+struct inode *arcofs_new_inode(const struct inode *dir, umode_t mode, int *error);
+static int arcofs_mknod(struct inode * dir, struct dentry *dentry, umode_t mode, dev_t rdev);
+static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+static struct dentry *arcofs_lookup(struct inode * dir, struct dentry *dentry, unsigned int flags);
+int arcofs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat);
+
+static int arcofs_statfs(struct dentry *dentry, struct kstatfs *buf);
+
+struct inode *arcofs_iget(struct super_block *sb, unsigned long ino);
+
+
+/*
+ * #3
+ * 操作结构声明
+ */
+// 地址空间操作结构
+static const struct address_space_operations arcofs_aops = {
+	.readpage = arcofs_readpage,
+	.writepage = arcofs_writepage,
+	// .write_begin = arcofs_write_begin,
+	// .write_end = generic_write_end,
+	.bmap = arcofs_bmap,
+};
+
+// dir操作结构 
+const struct inode_operations arcofs_dir_inode_operations = {
+	.create		= arcofs_create,
+	.lookup		= arcofs_lookup,
+	// .link		= arcofs_link,
+	// .unlink		= arcofs_unlink,
+	// .symlink	= arcofs_symlink,
+	// .mkdir		= arcofs_mkdir,
+	// .rmdir		= arcofs_rmdir,
+	.mknod		= arcofs_mknod,
+	// .rename		= arcofs_rename,
+	.getattr	= arcofs_getattr,
+	// .tmpfile	= arcofs_tmpfile,
+};
+const struct file_operations arcofs_dir_operations = {
+	.llseek		= generic_file_llseek,
+	.read		= generic_read_dir,
+	// .iterate	= arcofs_readdir,
+	.fsync		= generic_file_fsync,
+};
+
+// file操作结构
+// const struct inode_operations arcofs_file_inode_operations = {
+// 	.setattr	= arcofs_setattr,
+// 	.getattr	= arcofs_getattr,
+// };
+// const struct file_operations arcofs_file_operations = {
+// 	.llseek		= generic_file_llseek,
+// 	.read_iter	= generic_file_read_iter,
+// 	.write_iter	= generic_file_write_iter,
+// 	.mmap		= generic_file_mmap,
+// 	.fsync		= generic_file_fsync,
+// 	.splice_read	= generic_file_splice_read,
+// };
+
+// 超级块操作结构
+static const struct super_operations arcofs_sops = {
+	// .alloc_inode	= arcofs_alloc_inode,
+	// .destroy_inode	= arcofs_destroy_inode,
+	// .write_inode	= arcofs_write_inode,
+	// .evict_inode	= arcofs_evict_inode,
+	// .put_super	= arcofs_put_super,
+	.statfs		= arcofs_statfs,
+	// .remount_fs	= arcofs_remount,
 };
 
 
 
+/*
+ * #4
+ * 操作结构回调函数实现
+ */
+// ##4.1 aops方法实现
+int arcofs_writepage(struct page *page, struct writeback_control *wbc)
+{
+	return block_write_full_page(page, arcofs_get_block, wbc);
+}
+
+static int arcofs_readpage(struct file *file, struct page *page)
+{
+	return block_read_full_page(page, arcofs_get_block);
+}
+
+static sector_t arcofs_bmap(struct address_space *mapping, sector_t block)
+{
+	return generic_block_bmap(mapping,block, arcofs_get_block);
+}
+
+int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *bh, int create)
+{
+    printk("arco-fs: try get block %lld\n", block);
+    map_bh(bh, inode->i_sb, block);
+    return 0;
+}
+
+
+// ##4.2 dir方法实现
+void arcofs_set_inode(struct inode *inode, dev_t rdev)
+{
+    // 判断inode的i_mode，挂载不同的操作结构
+	if (S_ISREG(inode->i_mode)) {
+        printk("arco-fs: inode type file\n");
+		// inode->i_op = &arcofs_file_inode_operations;
+		// inode->i_fop = &arcofs_file_operations;
+		inode->i_mapping->a_ops = &arcofs_aops;
+	} 
+    else if (S_ISDIR(inode->i_mode)) {
+        printk("arco-fs: inode type dir\n");
+		inode->i_op = &arcofs_dir_inode_operations;
+		inode->i_fop = &arcofs_dir_operations;
+		inode->i_mapping->a_ops = &arcofs_aops;
+	}
+    else {
+        printk("arco-fs: unsupport inode type 0x%x\n", inode->i_mode);
+        init_special_inode(inode, inode->i_mode, rdev);
+    }
+}
+
+struct inode *arcofs_new_inode(const struct inode *dir, umode_t mode, int *error)
+{
+	struct super_block *sb = dir->i_sb;
+	struct arcofs_sb_info *sbi = sb->s_fs_info;
+	struct inode *inode = new_inode(sb);
+    // 找到一个空闲的inode
+    int i;
+    for (i = 0; i < sbi->s_as->s_inodes_count; i++) {
+        if (sbi->s_imap->idx[i] == 1) {
+            printk("arco-fs: find inode[%d] free\n", i);
+            sbi->s_imap->idx[i] = i + 1;
+            inode->i_ino = i + 1;
+            break;
+        }
+    }
+    inode->i_blocks = 0;
+	// insert_inode_hash(inode);
+    mark_inode_dirty(inode);
+    return inode;
+}
+
+static int arcofs_mknod(struct inode * dir, struct dentry *dentry, umode_t mode, dev_t rdev)
+{
+	int error;
+	struct inode *inode;
+
+	if (!old_valid_dev(rdev))
+		return -EINVAL;
+
+	inode = arcofs_new_inode(dir, mode, &error);
+
+	if (inode) {
+		arcofs_set_inode(inode, rdev);
+		mark_inode_dirty(inode);
+		// error = add_nondir(dentry, inode);
+	}
+	return error;
+}
+
+static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+{
+	return arcofs_mknod(dir, dentry, mode, 0);
+}
+
+
+ino_t arcofs_inode_by_name(struct dentry *dentry)
+{
+    return 0;
+}
+
+static struct dentry *arcofs_lookup(struct inode * dir, struct dentry *dentry, unsigned int flags)
+{
+	struct inode * inode = NULL;
+	ino_t ino;
+
+	ino = arcofs_inode_by_name(dentry);
+	if (ino) {
+		inode = arcofs_iget(dir->i_sb, ino);
+		if (IS_ERR(inode))
+			return ERR_CAST(inode);
+	}
+	d_add(dentry, inode);
+	return NULL;
+}
+
+int arcofs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
+{
+	struct super_block *sb = dentry->d_sb;
+	generic_fillattr(d_inode(dentry), stat);
+	// if (INODE_VERSION(d_inode(dentry)) == arcofs_V1)
+	// 	stat->blocks = (BLOCK_SIZE / 512) * V1_arcofs_blocks(stat->size, sb);
+    stat->blocks = ((struct arcofs_sb_info*)(sb->s_fs_info))->s_as->s_blocks_count;
+    stat->blksize = sb->s_blocksize;
+	return 0;
+}
+
+// ##4.3 file方法实现
+// 暂无
+
+// ##4.4 super block方法实现
+static int arcofs_statfs(struct dentry *dentry, struct kstatfs *buf)
+{
+	struct super_block *sb = dentry->d_sb;
+	struct arcofs_sb_info *sbi = sb->s_fs_info;
+    
+	buf->f_type = sb->s_magic;
+	buf->f_bsize = sb->s_blocksize;
+	buf->f_blocks = sbi->s_as->s_blocks_count;
+	buf->f_bfree = sbi->s_as->s_free_blocks_count;
+	buf->f_bavail = buf->f_bfree;
+	buf->f_files = (sbi->s_as->s_inodes_count - sbi->s_as->s_free_inodes_count);
+	buf->f_ffree = sbi->s_as->s_free_inodes_count;
+
+	return 0;
+}
+
+
+/*
+ * #5
+ * 文件系统挂载函数实现
+ * fill_super相关
+ */
 struct arcofs_inode* arcofs_raw_inode(struct super_block *sb, int ino, struct buffer_head **bh)
 {
     int block;
@@ -87,6 +323,9 @@ struct inode *arcofs_iget(struct super_block *sb, unsigned long ino)
     raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
     // 拼装VFS inode
     inode->i_size = raw_inode->i_size; // i_size是文件大小
+    inode->i_mode = raw_inode->i_mode; // i_mode是文件类型
+
+    arcofs_set_inode(inode, 0);
 
     return inode;
 }
@@ -97,7 +336,7 @@ static int arcofs_fill_super(struct super_block *s, void *data, int silent)
     int err = -1;
     struct arcofs_sb_info *sbi;
     struct inode *root_inode;
-    struct buffer_head *bh;
+    struct buffer_head *bh, *bh2, *bh3;
     struct arcofs_super_block *as;
 
     sbi = kzalloc(sizeof(struct arcofs_sb_info), GFP_KERNEL);
@@ -105,19 +344,34 @@ static int arcofs_fill_super(struct super_block *s, void *data, int silent)
         return -ENOMEM;
     s->s_fs_info = sbi;
 
+    // 设置sb->s_blocksize
     if (!sb_set_blocksize(s, ARCOFS_BLOCK_SIZE))
         goto out_bad_hblock;
 
     if (!(bh = sb_bread(s, 1)))
         goto out_bad_sb;
+    
+    if (!(bh2 = sb_bread(s, 2)))
+        goto out_bad_map;
+    
+    if (!(bh3 = sb_bread(s, 3)))
+        goto out_bad_map;
 
     // 把上一步读取出的块作为arcofs super_block
     as = (struct arcofs_super_block*) bh->b_data;
     sbi->s_as = as;
 
+	s->s_magic = as->s_magic;
+
     // 设置bit map
+    sbi->s_zmap = (struct arcofs_bytemap*) bh2->b_data;
+    sbi->s_imap = (struct arcofs_bytemap*) bh3->b_data;
+    printk("arco-fs: set bytemap over\n");
 
     // 判断block是否足够
+
+    // 注册super block操作结构
+    s->s_op = &arcofs_sops;
 
     // 获取根目录的inode(inode号从1开始)
     root_inode = arcofs_iget(s, 1);
@@ -140,6 +394,9 @@ static int arcofs_fill_super(struct super_block *s, void *data, int silent)
 
     out_bad_sb:
     printk("arco-fs: unable to read superblock\n");
+    
+    out_bad_map:
+    printk("arco-fs: unable to read block and inode map\n");
 
     out_no_root:
     printk("arco-fs: no root error\n");
