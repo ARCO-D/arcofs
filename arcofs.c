@@ -71,6 +71,9 @@ static int arcofs_unlink(struct inode * dir, struct dentry *dentry);
 //static int arcofs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat); // ubuntu16内核不一致，暂不实现
 static int arcofs_readdir(struct file *file, struct dir_context *ctx);
 
+static ssize_t arcofs_read(struct file *, char __user *, size_t, loff_t *);
+static ssize_t arcofs_write(struct file *, const char __user *, size_t, loff_t *);
+
 static int arcofs_statfs(struct dentry *dentry, struct kstatfs *buf);
 
 struct inode *arcofs_iget(struct super_block *sb, unsigned long ino);
@@ -117,8 +120,10 @@ const struct file_operations arcofs_dir_operations = {
  };
  const struct file_operations arcofs_file_operations = {
  	.llseek		= generic_file_llseek,
+//    .read       = arcofs_read,
+    .write      = arcofs_write,
  	.read_iter	= generic_file_read_iter,
- 	.write_iter	= generic_file_write_iter,
+// 	.write_iter	= generic_file_write_iter, // 这两个太高级了, 没玩明白, 先注释掉
  	.mmap		= generic_file_mmap,
     .open		= dquot_file_open,
  	.fsync		= generic_file_fsync,
@@ -216,8 +221,8 @@ struct inode *arcofs_new_inode(const struct inode *dir, umode_t mode, const char
     struct buffer_head* inode_table_block;
     inode_table_block = sb_bread(sb, 4); // block number of inode bytemap
     struct arcofs_inode *inode_table_arr = (struct arcofs_inode*)inode_table_block->b_data;
-    inode_table_arr[inode->i_ino].i_mode = S_IFREG;
-    strcpy(inode_table_arr[inode->i_ino].filename, name);
+    inode_table_arr[i].i_mode = S_IFREG;
+    strcpy(inode_table_arr[i].filename, name); // 用
     // 没有加入dentry的动作
 
 	// insert_inode_hash(inode);
@@ -320,6 +325,18 @@ static int arcofs_readdir(struct file *file, struct dir_context *ctx)
 
     return 0;
 }
+
+static ssize_t arcofs_read(struct file *, char __user *, size_t, loff_t *)
+{
+    return 0;
+}
+
+static ssize_t arcofs_write(struct file *, const char __user *, size_t, loff_t *)
+{
+
+}
+
+
 
 // ##4.3 file方法实现
 // 暂无

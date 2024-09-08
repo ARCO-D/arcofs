@@ -90,8 +90,8 @@ int main(int argc, char* argv[])
     /* 格式化super_block */
     struct arcofs_super_block *sb = malloc(sizeof(struct arcofs_super_block));
     sb->s_magic = ARCOFS_MAGIC;
-    sb->s_inodes_count = 16;
-    sb->s_free_inodes_count = 16;
+    sb->s_inodes_count = (ARCOFS_BLOCK_SIZE / sizeof(struct arcofs_inode));
+    sb->s_free_inodes_count = sb->s_inodes_count - 2; // .和..
     sb->s_blocks_count = block_num - 4;
     sb->s_free_blocks_count = block_num - 4;
     memset(sb->pad, 0, sizeof(sb->pad));
@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
     // 创建..目录inode
     memset(start, 0, ARCOFS_BLOCK_SIZE);
     struct arcofs_inode *node_dotdot = malloc(sizeof(struct arcofs_inode));
-    node_dot->i_mode = S_IFDIR;
+    node_dotdot->i_mode = S_IFDIR;
     strcpy(node_dotdot->filename, "..");
     memset(node_dotdot->i_block, 0, sizeof(node_dotdot->i_block));
     memset(node_dotdot->pad, 0, sizeof(node_dotdot->pad));
