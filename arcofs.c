@@ -71,8 +71,8 @@ static int arcofs_unlink(struct inode * dir, struct dentry *dentry);
 //static int arcofs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat); // ubuntu16内核不一致，暂不实现
 static int arcofs_readdir(struct file *file, struct dir_context *ctx);
 
-static ssize_t arcofs_read(struct file *, char __user *, size_t, loff_t *);
-static ssize_t arcofs_write(struct file *, const char __user *, size_t, loff_t *);
+static ssize_t arcofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
+static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
 
 static int arcofs_statfs(struct dentry *dentry, struct kstatfs *buf);
 
@@ -267,17 +267,41 @@ static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 }
 
 
-ino_t arcofs_inode_by_name(struct dentry *dentry)
+//static inline unsigned long dir_pages(struct inode *inode)
+//{
+//    return (inode->i_size+PAGE_CACHE_SIZE-1)>>PAGE_CACHE_SHIFT;
+//}
+
+ino_t arcofs_inode_by_name(struct inode* dir, struct dentry *dentry)
 {
-    return 0;
+    printk("arco-fs: execute arcofs_inode_by_name\n");
+
+    int i, ino = 0;
+    struct super_block* sb = dir->i_sb;
+    struct arcofs_sb_info* sbi = sb->s_fs_info;
+    struct buffer_head* bh;
+
+    // 在inode表里直接找
+    bh = sb_bread(sb, 4);
+    struct arcofs_inode* inode_table_arr = (struct arcofs_inode*)bh->b_data;
+    for (i = 0; i < sbi->s_as->s_inodes_count; i++) {
+        printk("arco-fs: match [%s] [%s]", inode_table_arr[i].filename, dentry->d_name.name);
+        if (strcmp(inode_table_arr[i].filename, dentry->d_name.name) == 0) {
+            ino = i + 1;
+            break;
+        }
+    }
+    printk("arco-fs: file[%s] ino=%d", dentry->d_name.name, ino);
+
+    return ino;
 }
 
-static struct dentry *arcofs_lookup(struct inode * dir, struct dentry *dentry, unsigned int flags)
+static struct dentry *arcofs_lookup(struct inode* dir, struct dentry *dentry, unsigned int flags)
 {
 	struct inode * inode = NULL;
 	ino_t ino;
 
-	ino = arcofs_inode_by_name(dentry);
+	ino = arcofs_inode_by_name(dir, dentry);
 	if (ino) {
 		inode = arcofs_iget(dir->i_sb, ino);
 		if (IS_ERR(inode))
@@ -326,14 +350,33 @@ static int arcofs_readdir(struct file *file, struct dir_context *ctx)
     return 0;
 }
 
-static ssize_t arcofs_read(struct file *, char __user *, size_t, loff_t *)
+static ssize_t arcofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
-    return 0;
+
 }
 
-static ssize_t arcofs_write(struct file *, const char __user *, size_t, loff_t *)
+int arcofs_new_block(struct inode* inode)
 {
+    return 5;
+}
 
+static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
+{
+    int alloc_block = 5;
+    char kbuf[ARCOFS_BLOCK_SIZE];
+    struct inode* inode = filp->f_mapping->host;
+    struct super_block* sb = inode->i_sb;
+    struct buffer_head* bh;
+
+    if (copy_from_user(kbuf, buf, len)) {
+        return -EFAULT;
+    }
+
+    alloc_block = arcofs_new_block(inode);
+    bh = sb_bread(sb, alloc_block);
+    memcpy(bh->b_data, kbuf, len);
+
+    return len;
 }
 
 
