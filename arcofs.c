@@ -308,14 +308,12 @@ static struct dentry *arcofs_lookup(struct inode* dir, struct dentry *dentry, un
 	return NULL;
 }
 
-static int arcofs_unlink(struct inode * dir, struct dentry *dentry)
+static void arcofs_free_file(struct inode *inode, struct arcofs_inode *raw_inode)
 {
-    printk("arco-fs: execute unlink\n");
     int i;
-    struct inode *inode = d_inode(dentry);
     struct super_block *sb = inode->i_sb;
-    struct buffer_head *bh, *bh2, *bh3;
-    struct arcofs_inode *raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
+    struct buffer_head *bh2, *bh3;
+
     // 清除标志位
     raw_inode->i_mode = 0;
     raw_inode->i_size = 0;
@@ -337,11 +335,23 @@ static int arcofs_unlink(struct inode * dir, struct dentry *dentry)
     inode_bytemap_arr[inode->i_ino - 1] = 1;
     printk("arco-fs: inode[%d] once occupied, now free\n", inode->i_ino - 1);
 
-    // 减少vfs层面的引用？不懂
-    inode_dec_link_count(inode);
-
     mark_buffer_dirty(bh2);
     mark_buffer_dirty(bh3);
+}
+
+static int arcofs_unlink(struct inode * dir, struct dentry *dentry)
+{
+    printk("arco-fs: execute unlink\n");
+    struct inode *inode = d_inode(dentry);
+    struct super_block *sb = inode->i_sb;
+    struct buffer_head *bh;
+    struct arcofs_inode *raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
+
+    // 释放文件占用的资源
+    arcofs_free_file(inode, raw_inode);
+
+    // 减少vfs层面的引用？不懂
+    inode_dec_link_count(inode);
 
     return 0;
 }
@@ -384,7 +394,7 @@ int rflag = 1;
 static ssize_t arcofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
     rflag = !rflag;
-    printk("arco-fs: execute read. len=%d rflag=%d\n", len, rflag);
+    printk("arco-fs: execute read. len=%d f_flags=0x%x rflag=%d\n", len, filp->f_flags, rflag);
     if (rflag) return 0;
     int i, block_number, block_idx;
     char kbuf[ARCOFS_BLOCK_SIZE];
@@ -440,8 +450,10 @@ int arcofs_new_block(struct inode* inode)
     return block_number;
 }
 
+
 static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
+    printk("arco-fs: execute write. len=%d f_flags=0x%x\n", len, filp->f_flags);
     int i, alloc_block = 5;
     char kbuf[ARCOFS_BLOCK_SIZE];
     struct inode* inode = filp->f_mapping->host;
@@ -458,8 +470,15 @@ static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t le
     // 查找inode的iblock
     raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
 
-    // 判断是否未分配块|或者某个块已经用完
-    if (raw_inode->i_size % ARCOFS_BLOCK_SIZE == 0) {
+    // 如果是覆盖写入模式, 需要截断文件长度(直接调用释放文件资源函数
+    if (!filp->f_flags & O_EXCL) {
+        int tmp_mode = raw_inode->i_mode;
+        arcofs_free_file(inode, raw_inode);
+        raw_inode->i_mode = tmp_mode;
+    }
+
+    // 如果未分配块
+    if (raw_inode->i_size == 0) {
         for (i = 0; i < 8; i++) {
             if (raw_inode->i_block[i] == 0) {
                 printk("arco-fs: use i_block[%d]\n", i);
@@ -472,8 +491,13 @@ static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t le
         printk("arco-fs: i_block[%d] run out\n");
         return -ENOSPC;
     }
+    // 如果某个块刚好用完(需要更新文件长度
+    else if (raw_inode->i_size % ARCOFS_BLOCK_SIZE == 0) {
+        printk("arco-fs: temporarily don't deal 0\n");
+        return -ENOSPC;
+    }
     else {
-        printk("arco-fs: temporarily don't deal\n");
+        printk("arco-fs: temporarily don't deal 1\n");
         return -ENOSPC;
     }
 
