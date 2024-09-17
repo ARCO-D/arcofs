@@ -42,6 +42,12 @@ arcofs inode设定为64byte, 还有12字节的padding
 第4个block, 用作inode table<br>
 (为了方便编程, 我直接使用一个unsigned char类型来标注一个块是否被占用, 所以是 byte map
 
+**数据块管理**<br>
+简化了ext2文件系统中间接、双重间接、三重间接的管理方式，arcofs的每个inode仅管理8个直接块
+
+**dentry结构**<br>
+没有<br>
+arcofs没有设立专门的dentry结构，也没打算管理目录；文件名以最长11个字节的形式保存在inode中
 
 ## mkarcofs 说明
 原谅我<br>
