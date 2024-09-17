@@ -270,12 +270,12 @@ static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 ino_t arcofs_inode_by_name(struct inode* dir, struct dentry *dentry)
 {
-    printk("arco-fs: execute arcofs_inode_by_name\n");
-
     int i, ino = 0;
     struct super_block* sb = dir->i_sb;
     struct arcofs_sb_info* sbi = sb->s_fs_info;
     struct buffer_head* bh;
+
+    printk("arco-fs: execute arcofs_inode_by_name\n");
 
     // 在inode表里直接找
     bh = sb_bread(sb, 4);
@@ -336,7 +336,7 @@ static void arcofs_free_file(struct inode *inode, struct arcofs_inode *raw_inode
     bh3 = sb_bread(sb, 3);
     unsigned char* inode_bytemap_arr = (unsigned char*)bh3->b_data;
     inode_bytemap_arr[inode->i_ino - 1] = 1;
-    printk("arco-fs: inode[%d] once occupied, now free\n", inode->i_ino - 1);
+    printk("arco-fs: inode[%lu] once occupied, now free\n", inode->i_ino - 1);
 
     mark_buffer_dirty(bh3);
 }
@@ -345,7 +345,6 @@ static int arcofs_unlink(struct inode * dir, struct dentry *dentry)
 {
     printk("arco-fs: execute unlink\n");
     struct inode *inode = d_inode(dentry);
-    struct super_block *sb = inode->i_sb;
     struct buffer_head *bh;
     struct arcofs_inode *raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
 
@@ -392,13 +391,11 @@ static int arcofs_readdir(struct file *file, struct dir_context *ctx)
     return 0;
 }
 
-int rflag = 1;
 static ssize_t arcofs_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
-    rflag = !rflag;
-    printk("arco-fs: execute read. len=%d f_flags=0x%x rflag=%d\n", len, filp->f_flags, rflag);
-    if (rflag) return 0;
-    int i, block_number, read_len, read_offset = 0;
+    printk("arco-fs: execute read. len=%ld f_flags=0x%x ppos=%lld\n", len, filp->f_flags, *ppos);
+
+    int i, read_len, read_offset = 0;
     char pot[ARCOFS_BLOCK_SIZE * 8];
     char *kbuf = pot;
     struct inode* inode = filp->f_mapping->host;
@@ -408,6 +405,12 @@ static ssize_t arcofs_read(struct file *filp, char __user *buf, size_t len, loff
 
     // 查找inode的iblock
     raw_inode = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bh);
+    // 判断文件是否读完
+    if (*ppos == raw_inode->i_size) {
+        printk("arco-fs: arrive file end\n");
+        return 0;
+    }
+
     // 查找这个inode的每个block, 把数据拷贝到kbuf中
     for (i = 0; i < 8; i++) {
         if (raw_inode->i_block[i] == 0) {
@@ -461,7 +464,7 @@ int arcofs_alloc_block(struct inode* inode)
 
 static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
-    printk("arco-fs: execute write. len=%d f_flags=0x%x\n", len, filp->f_flags);
+    printk("arco-fs: execute write. len=%ld f_flags=0x%x\n", len, filp->f_flags);
     int i, r, alloc_block = 5, remain_len = len, write_len, block_offset = 0, write_offset = 0;
     char pot[ARCOFS_BLOCK_SIZE * 8];
     char *kbuf = pot;
@@ -518,11 +521,10 @@ static ssize_t arcofs_write(struct file *filp, const char __user *buf, size_t le
             // 如果最后一个block剩余的空间不足以满足当次的写入
             printk("arco-fs: block_offset(%d) + write_len(%d) = %d\n", block_offset, write_len, block_offset + write_len);
             if (block_offset + write_len > 1024) write_len = (1024 - block_offset);
-//            remain_len += block_offset; // 这轮之后remain_len会减去1024
         }
         remain_len -= write_len;
 
-    write_block:
+    // write_block:
         if (alloc_block == 0) {
             printk("arco-fs: find block err\n");
             return -ENOSPC;
