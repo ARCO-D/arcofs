@@ -14,10 +14,16 @@
 #include <linux/quotaops.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
+#include <linux/compiler.h>
 
 #define ARCOFS_VERSION "0.1"
 #define ARCOFS_BLOCK_SIZE 1024
 #define ARCOFS_MAGIC   0x27266673 // 0x6673 is the ascii of 'fs'
+
+#ifndef __CHECKER__
+extern void *__stack_chk_guard;
+extern void __stack_chk_fail(void);
+#endif
 
 /*
  * #1
@@ -64,8 +70,8 @@ int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *b
 
 void arcofs_set_inode(struct inode *inode, dev_t rdev);
 struct inode *arcofs_new_inode(const struct inode *dir, umode_t mode, const char *name);
-static int arcofs_mknod(struct inode * dir, struct dentry *dentry, umode_t mode, dev_t rdev);
-static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+static int arcofs_mknod(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev);
+static int arcofs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
 static struct dentry *arcofs_lookup(struct inode * dir, struct dentry *dentry, unsigned int flags);
 static int arcofs_unlink(struct inode * dir, struct dentry *dentry);
 //static int arcofs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat); // ubuntu16内核不一致，暂不实现
@@ -86,7 +92,7 @@ struct inode *arcofs_iget(struct super_block *sb, unsigned long ino);
  */
 // 地址空间操作结构
 static const struct address_space_operations arcofs_aops = {
-	.readpage = arcofs_readpage,
+	// .readpage = arcofs_readpage,
 	.writepage = arcofs_writepage,
 	// .write_begin = arcofs_write_begin,
 	// .write_end = generic_write_end,
@@ -108,10 +114,10 @@ const struct inode_operations arcofs_dir_inode_operations = {
 	// .tmpfile	= arcofs_tmpfile,
 };
 const struct file_operations arcofs_dir_operations = {
-	.llseek		= generic_file_llseek,
-	.read		= generic_read_dir,
-    .iterate	= arcofs_readdir,
-	.fsync		= generic_file_fsync,
+	.llseek		    = generic_file_llseek,
+	.read		    = generic_read_dir,
+    .iterate_shared	= arcofs_readdir,
+	.fsync		    = generic_file_fsync,
 };
 
 // file操作结构
@@ -128,7 +134,7 @@ const struct file_operations arcofs_dir_operations = {
  	.mmap		= generic_file_mmap,
     .open		= dquot_file_open,
  	.fsync		= generic_file_fsync,
- 	.splice_read	= generic_file_splice_read,
+// .splice_read	= generic_file_splice_read,
  };
 
 // 超级块操作结构
@@ -156,7 +162,8 @@ int arcofs_writepage(struct page *page, struct writeback_control *wbc)
 
 static int arcofs_readpage(struct file *file, struct page *page)
 {
-	return block_read_full_page(page, arcofs_get_block);
+	// return block_read_full_page(page, arcofs_get_block);
+    return 0;
 }
 
 static sector_t arcofs_bmap(struct address_space *mapping, sector_t block)
@@ -166,7 +173,7 @@ static sector_t arcofs_bmap(struct address_space *mapping, sector_t block)
 
 int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *bh, int create)
 {
-    printk("arco-fs: try get block %ld\n", block);
+    printk("arco-fs: try get block %lld\n", block);
     map_bh(bh, inode->i_sb, block);
     return 0;
 }
@@ -242,7 +249,7 @@ static int arcofs_add_nondir(struct dentry *dentry, struct inode *inode)
 }
 
 // umode_t是unsigned short类型
-static int arcofs_mknod(struct inode * dir, struct dentry *dentry, umode_t mode, dev_t rdev)
+static int arcofs_mknod(struct mnt_idmap *idmap, struct inode * dir, struct dentry *dentry, umode_t mode, dev_t rdev)
 {
 	int error = 0;
 	struct inode *inode;
@@ -262,9 +269,9 @@ static int arcofs_mknod(struct inode * dir, struct dentry *dentry, umode_t mode,
 	return error;
 }
 
-static int arcofs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+static int arcofs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
 {
-	return arcofs_mknod(dir, dentry, mode, 0);
+	return arcofs_mknod(idmap, dir, dentry, mode, 0);
 }
 
 
