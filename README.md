@@ -3,6 +3,11 @@
 一个简单的文件系统驱动arcofs.ko，以及创建该文件系统的工具mkarcofs
 
 ## 说明
+### 分支
+linux-4.15 在4.15版本内核上编译、运行通过
+
+linux-6.6 如果gcc的版本低于9, 需要在Make menuconfig时关闭STACKPROTECTOR
+
 ### version 0.0
 挂载： 支持
 
