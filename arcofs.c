@@ -15,6 +15,7 @@
 #include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/compiler.h>
+#include <linux/mpage.h>
 
 #define ARCOFS_VERSION "0.1"
 #define ARCOFS_BLOCK_SIZE 1024
@@ -63,6 +64,7 @@ struct arcofs_sb_info {
  * 函数声明 
  */
 int arcofs_writepage(struct page *page, struct writeback_control *wbc);
+static void arcofs_readahead(struct readahead_control *rac);
 static int arcofs_readpage(struct file *file, struct page *page);
 static sector_t arcofs_bmap(struct address_space *mapping, sector_t block);
 int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *bh, int create);
@@ -94,6 +96,7 @@ struct inode *arcofs_iget(struct super_block *sb, unsigned long ino);
 static const struct address_space_operations arcofs_aops = {
 	// .readpage = arcofs_readpage,
 	.writepage = arcofs_writepage,
+    .readahead = arcofs_readahead,
 	// .write_begin = arcofs_write_begin,
 	// .write_end = generic_write_end,
 	.bmap = arcofs_bmap,
@@ -127,9 +130,9 @@ const struct file_operations arcofs_dir_operations = {
  };
  const struct file_operations arcofs_file_operations = {
  	.llseek		= generic_file_llseek,
-    .read       = arcofs_read,
+//    .read       = arcofs_read,
     .write      = arcofs_write,
-// 	.read_iter	= generic_file_read_iter,
+ 	.read_iter	= generic_file_read_iter,
 // 	.write_iter	= generic_file_write_iter, // 这两个太高级了, 没玩明白, 先注释掉
  	.mmap		= generic_file_mmap,
     .open		= dquot_file_open,
@@ -158,6 +161,11 @@ static const struct super_operations arcofs_sops = {
 int arcofs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	return block_write_full_page(page, arcofs_get_block, wbc);
+}
+
+static void arcofs_readahead(struct readahead_control *rac)
+{
+    mpage_readahead(rac, arcofs_get_block);
 }
 
 static int arcofs_readpage(struct file *file, struct page *page)
