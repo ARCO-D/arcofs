@@ -182,7 +182,12 @@ static sector_t arcofs_bmap(struct address_space *mapping, sector_t block)
 int arcofs_get_block(struct inode * inode, sector_t block, struct buffer_head *bh, int create)
 {
     printk("arco-fs: try get block %lld\n", block);
-    map_bh(bh, inode->i_sb, block);
+    struct buffer_head* bhi;
+    struct arcofs_inode* raw_inode  = arcofs_raw_inode(inode->i_sb, inode->i_ino, &bhi);
+    int bno = raw_inode->i_block[block];
+    map_bh(bh, inode->i_sb, bno);
+    // don't read bh in sb_read, use a different var, (it doesn't matter whether do sb_read(bno)
+    printk("arcofs: map bno %d\n", bno);
     return 0;
 }
 

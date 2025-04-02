@@ -60,9 +60,9 @@ int main(int argc, char* argv[])
         printf("mkarcofs: %s is not file", filename);
         return -1;
     }
-    // 计算文件大小是否能进行格式化(最少16kb)
+    // 计算文件大小是否能进行格式化(最少16个块)
     printf("mkarcofs: file size=%ldbyte\n", st.st_size);
-    if (st.st_size * 8 < 16 * 1024) {
+    if (st.st_size * 8 < 16 * ARCOFS_BLOCK_SIZE) {
         printf("mkarcofs: file size too small, can't make arcofs\n");
         return -1;
     }
@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
     start += ARCOFS_BLOCK_SIZE;
 
     /* 计算可分配的block数量 */
-    block_num = st.st_size / 1024 - 1;
+    block_num = st.st_size / ARCOFS_BLOCK_SIZE - 1;
     printf("mkarcofs: block_num=%d\n", block_num);
 
     /* 格式化super_block */

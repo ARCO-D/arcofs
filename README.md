@@ -25,7 +25,7 @@ linux-6.6 如果gcc的版本低于9, 需要在Make menuconfig时关闭STACKPROTE
 实现的过时的write方法, write_iter还没看明白
 
 读文件： 当前仅支持读取1024kb以内的内容<br>
-实现的过时的read方法, read_iter还没看明白
+实现了过时的read方法,也实现了read_iter
 
 ## 实现细节
 **block size:** 1024byte
